@@ -1,15 +1,27 @@
-library intl_phone_field2;
+library;
 
 import 'dart:async';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/material.dart';
+
 import 'package:flutter/services.dart';
 import 'package:intl_phone_field2/country_picker_dialog.dart';
-import 'package:intl_phone_field2/helpers.dart';
+import 'package:intl_phone_field2/cupertino_intl_phone_field.dart';
+import 'package:intl_phone_field2/src/country_flag.dart';
+import 'package:intl_phone_field2/src/country_utils.dart';
+import 'package:intl_phone_field2/src/cupertino_defaults.dart';
+import 'package:intl_phone_field2/src/phone_validation.dart';
+import 'package:material_ui/material_ui.dart';
 
 import './countries.dart';
 import './phone_number.dart';
 
+export 'package:intl_phone_field2/country_picker_dialog.dart' show PickerDialogStyle;
+export 'package:intl_phone_field2/cupertino_country_picker.dart' show CupertinoCountryPickerStyle;
+export 'package:intl_phone_field2/src/icon_position.dart';
+
+/// A Material text field to enter a phone number, with a country code picker.
+///
+/// Use [IntlPhoneField.adaptive] to get a [CupertinoIntlPhoneField] on iOS
+/// and macOS instead.
 class IntlPhoneField extends StatefulWidget {
   /// Whether to hide the text being edited (e.g., for passwords).
   final bool obscureText;
@@ -43,9 +55,12 @@ class IntlPhoneField extends StatefulWidget {
   /// The validator can handle asynchronous validation when declared as a [Future].
   /// Or run synchronously when declared as a [Function].
   ///
-  /// By default, the validator checks whether the input number length is between selected country's phone numbers min and max length.
-  /// If `disableLengthCheck` is not set to `true`, your validator returned value will be overwritten by the default validator.
-  /// But, if `disableLengthCheck` is set to `true`, your validator will have to check phone number length itself.
+  /// Unless [disableLengthCheck] is `true`, a non-empty number must first contain
+  /// only digits and be between the selected country's min and max length;
+  /// otherwise [invalidNumberMessage] is shown and your validator is not called.
+  ///
+  /// An asynchronous validator runs once per distinct number. Until it completes,
+  /// the previous message stays visible; the field then validates again.
   final FutureOr<String?> Function(PhoneNumber?)? validator;
 
   /// {@macro flutter.widgets.editableText.keyboardType}
@@ -54,6 +69,9 @@ class IntlPhoneField extends StatefulWidget {
   /// Controls the text being edited.
   ///
   /// If null, this widget will create its own [TextEditingController].
+  ///
+  /// When a controller is provided, [initialValue] is ignored: set the national
+  /// number on the controller and the country with [initialCountryCode].
   final TextEditingController? controller;
 
   /// Defines the keyboard focus for this widget.
@@ -123,8 +141,13 @@ class IntlPhoneField extends StatefulWidget {
 
   /// Initial Value for the field.
   /// This property can be used to pre-fill the field.
+  ///
+  /// A full international number such as `+447891234567` also selects its
+  /// country, using the longest matching dial code.
   final String? initialValue;
 
+  /// Language used for country names in the picker, such as `en`, `de` or
+  /// `pt_BR`. Falls back to English when no translation exists.
   final String languageCode;
 
   /// 2 letter ISO Code or country dial code.
@@ -158,6 +181,9 @@ class IntlPhoneField extends StatefulWidget {
   final bool disableLengthCheck;
 
   /// Won't work if [enabled] is set to `false`.
+  ///
+  /// The country picker can't be opened when [enabled] is `false` or
+  /// [readOnly] is `true`.
   final bool showDropdownIcon;
 
   final BoxDecoration dropdownDecoration;
@@ -169,6 +195,9 @@ class IntlPhoneField extends StatefulWidget {
   final List<TextInputFormatter>? inputFormatters;
 
   /// The text that describes the search input field.
+  ///
+  /// With [IntlPhoneField.adaptive], it is also the placeholder of the
+  /// Cupertino picker's search field.
   ///
   /// When the input field is empty and unfocused, the label is displayed on top of the input field (i.e., at the same location on the screen where text may be entered in the input field).
   /// When the input field receives focus (or if the field is non-empty), the label moves above (i.e., vertically adjacent to) the input field.
@@ -243,17 +272,43 @@ class IntlPhoneField extends StatefulWidget {
   //enable the autofill hint for phone number
   final bool disableAutoFillHints;
 
-// The width of country selection popup Screen
+  /// The width of the country picker. Overrides [PickerDialogStyle.width].
+  ///
+  /// When [positionedPopup] is `true`, defaults to the width of the field.
   final double? popupWidth;
 
-  // Show Popup in the position of click
+  /// Shows the country picker as a dropdown attached to the field instead of a
+  /// centered dialog. It opens below the field, or above it when there is more
+  /// room there, and always stays on screen.
   final bool positionedPopup;
 
+  /// Overrides [InputDecoration.contentPadding] of [decoration].
   final EdgeInsets? textFieldPadding;
+
+  /// Overrides [InputDecoration.isDense] of [decoration].
   final bool? textFieldIsDense;
+
+  /// Width of the country flag. Emoji flags are scaled proportionally.
   final double flagWidth;
+
+  /// Decoration of the field on iOS and macOS, with [IntlPhoneField.adaptive].
+  /// Defaults to a rounded border; `null` draws no border.
+  final BoxDecoration? cupertinoDecoration;
+
+  /// Styles the country picker sheet on iOS and macOS, with
+  /// [IntlPhoneField.adaptive].
+  final CupertinoCountryPickerStyle? cupertinoPickerStyle;
+
+  final bool _adaptive;
+
+  // The values passed to IntlPhoneField.adaptive, where null means the
+  // platform's default.
+  final Icon? _adaptiveDropdownIcon;
+  final IconPosition? _adaptiveDropdownIconPosition;
+  final EdgeInsetsGeometry? _adaptiveFlagsButtonPadding;
+
   const IntlPhoneField({
-    Key? key,
+    super.key,
     this.popupWidth,
     this.flagWidth = 32,
     this.textFieldPadding,
@@ -302,102 +357,204 @@ class IntlPhoneField extends StatefulWidget {
     this.showCursor = true,
     this.pickerDialogStyle,
     this.flagsButtonMargin = EdgeInsets.zero,
-  }) : super(key: key);
+  }) : cupertinoDecoration = null,
+       cupertinoPickerStyle = null,
+       _adaptive = false,
+       _adaptiveDropdownIcon = null,
+       _adaptiveDropdownIconPosition = null,
+       _adaptiveFlagsButtonPadding = null;
+
+  /// Creates a phone field that follows the platform's design: a
+  /// [CupertinoIntlPhoneField] with a sheet picker on iOS and macOS, and a
+  /// Material field with a dialog picker everywhere else.
+  ///
+  /// The platform is read from [ThemeData.platform], like Flutter's own
+  /// adaptive widgets such as [Switch.adaptive].
+  ///
+  /// On iOS and macOS:
+  ///  * [decoration]'s `hintText` (or else `labelText`) is the placeholder,
+  ///    styled by its `hintStyle`; its `errorStyle` styles validation
+  ///    messages. [cupertinoDecoration] draws the field.
+  ///  * [cupertinoPickerStyle] styles the country picker sheet.
+  ///  * Material-only options are ignored: [positionedPopup], [popupWidth],
+  ///    [pickerDialogStyle], [dropdownDecoration], [flagsButtonMargin] and
+  ///    [textFieldIsDense].
+  ///
+  /// When null, [dropdownIcon], [dropdownIconPosition], [flagsButtonPadding]
+  /// and [cursorRadius] follow each platform's style.
+  const IntlPhoneField.adaptive({
+    super.key,
+    this.popupWidth,
+    this.flagWidth = 32,
+    this.textFieldPadding,
+    this.textFieldIsDense,
+    this.positionedPopup = false,
+    this.initialCountryCode,
+    this.languageCode = 'en',
+    this.disableAutoFillHints = false,
+    this.obscureText = false,
+    this.textAlign = TextAlign.start,
+    this.textAlignVertical,
+    this.onTap,
+    this.readOnly = false,
+    this.initialValue,
+    this.keyboardType = TextInputType.phone,
+    this.controller,
+    this.focusNode,
+    this.decoration = const InputDecoration(),
+    this.style,
+    this.dropdownTextStyle,
+    this.onSubmitted,
+    this.validator,
+    this.onChanged,
+    this.countries,
+    this.onCountryChanged,
+    this.onSaved,
+    this.showDropdownIcon = true,
+    this.dropdownDecoration = const BoxDecoration(),
+    this.inputFormatters,
+    this.enabled = true,
+    this.keyboardAppearance,
+    this.searchText = 'Search country',
+    IconPosition? dropdownIconPosition,
+    Icon? dropdownIcon,
+    this.autofocus = false,
+    this.textInputAction,
+    this.autovalidateMode = AutovalidateMode.onUserInteraction,
+    this.showCountryFlag = true,
+    this.cursorColor,
+    this.disableLengthCheck = false,
+    EdgeInsetsGeometry? flagsButtonPadding,
+    this.invalidNumberMessage = 'Invalid Mobile Number',
+    this.cursorHeight,
+    this.cursorRadius,
+    this.cursorWidth = 2.0,
+    this.showCursor = true,
+    this.pickerDialogStyle,
+    this.flagsButtonMargin = EdgeInsets.zero,
+    this.cupertinoDecoration = kCupertinoPhoneFieldDecoration,
+    this.cupertinoPickerStyle,
+  }) : dropdownIcon = dropdownIcon ?? const Icon(Icons.arrow_drop_down),
+       dropdownIconPosition = dropdownIconPosition ?? IconPosition.leading,
+       flagsButtonPadding = flagsButtonPadding ?? EdgeInsets.zero,
+       _adaptive = true,
+       _adaptiveDropdownIcon = dropdownIcon,
+       _adaptiveDropdownIconPosition = dropdownIconPosition,
+       _adaptiveFlagsButtonPadding = flagsButtonPadding;
 
   @override
   IntlPhoneFieldState createState() => IntlPhoneFieldState();
 }
 
 class IntlPhoneFieldState extends State<IntlPhoneField> {
+  final GlobalKey<FormFieldState<String>> _fieldKey = GlobalKey<FormFieldState<String>>();
+  late final GlobalKey<CupertinoIntlPhoneFieldState> _cupertinoKey = GlobalKey<CupertinoIntlPhoneFieldState>();
+  late final PhoneFieldValidation _validation = PhoneFieldValidation(onAsyncResult: _revalidate);
   late List<Country> _countryList;
   late Country _selectedCountry;
-  late List<Country> filteredCountries;
-  late String number;
+  late String _initialNumber;
 
-  String? validatorMessage;
+  /// The currently selected country.
+  Country get selectedCountry => _cupertinoKey.currentState?.selectedCountry ?? _selectedCountry;
+
+  /// The number currently entered, with the selected country.
+  PhoneNumber get phoneNumber =>
+      _cupertinoKey.currentState?.phoneNumber ?? phoneNumberFor(_selectedCountry, _currentNumber);
+
+  String get _currentNumber => _fieldKey.currentState?.value ?? widget.controller?.text ?? _initialNumber;
+
+  bool get _canPickCountry => widget.enabled && !widget.readOnly;
+
+  bool get _useCupertino =>
+      widget._adaptive &&
+      switch (Theme.of(context).platform) {
+        TargetPlatform.iOS || TargetPlatform.macOS => true,
+        _ => false,
+      };
 
   @override
   void initState() {
     super.initState();
     _countryList = widget.countries ?? countries;
-    filteredCountries = _countryList;
-    number = widget.initialValue ?? '';
-    if (widget.initialCountryCode == null && number.startsWith('+')) {
-      number = number.substring(1);
-      // parse initial value
-      _selectedCountry = countries.firstWhere((country) => number.startsWith(country.fullCountryCode),
-          orElse: () => _countryList.first);
+    final initial = parseInitialPhoneNumber(
+      countries: _countryList,
+      initialCountryCode: widget.initialCountryCode,
+      initialValue: widget.initialValue,
+    );
+    _selectedCountry = initial.country;
+    _initialNumber = initial.number;
+  }
 
-      // remove country code from the initial number value
-      number = number.replaceFirst(RegExp("^${_selectedCountry.fullCountryCode}"), "");
-    } else {
-      _selectedCountry = _countryList.firstWhere((item) => item.code == (widget.initialCountryCode ?? 'US'),
-          orElse: () => _countryList.first);
-
-      // remove country code from the initial number value
-      if (number.startsWith('+')) {
-        number = number.replaceFirst(RegExp("^\\+${_selectedCountry.fullCountryCode}"), "");
-      } else {
-        number = number.replaceFirst(RegExp("^${_selectedCountry.fullCountryCode}"), "");
-      }
-    }
-
-    if (widget.autovalidateMode == AutovalidateMode.always) {
-      final initialPhoneNumber = PhoneNumber(
-        countryISOCode: _selectedCountry.code,
-        countryCode: '+${_selectedCountry.dialCode}',
-        number: widget.initialValue ?? '',
-      );
-
-      final value = widget.validator?.call(initialPhoneNumber);
-
-      if (value is String) {
-        validatorMessage = value;
-      } else {
-        (value as Future).then((msg) {
-          validatorMessage = msg;
-        });
-      }
+  @override
+  void didUpdateWidget(IntlPhoneField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.countries != oldWidget.countries) {
+      _countryList = widget.countries ?? countries;
     }
   }
 
-  Future<void> _changeCountry(TapUpDetails tapDetails) async {
-    filteredCountries = _countryList;
+  @override
+  void dispose() {
+    _validation.dispose();
+    super.dispose();
+  }
 
-    await showDialog(
-      barrierColor: widget.positionedPopup ? Colors.transparent : Colors.black45,
+  void _revalidate() {
+    if (mounted) _fieldKey.currentState?.validate();
+  }
+
+  String? _validate(String? value) => _validation.validate(
+    value: value,
+    country: _selectedCountry,
+    disableLengthCheck: widget.disableLengthCheck,
+    invalidNumberMessage: widget.invalidNumberMessage,
+    validator: widget.validator,
+  );
+
+  void _onCountrySelected(Country country) {
+    if (!mounted) return;
+    final changed = !isSameCountry(country, _selectedCountry);
+    setState(() => _selectedCountry = country);
+    widget.onCountryChanged?.call(country);
+    if (changed) widget.onChanged?.call(phoneNumber);
+  }
+
+  /// The field's bounds in the coordinate space of the picker's overlay.
+  Rect? _anchorRect() {
+    final field = _fieldKey.currentContext?.findRenderObject();
+    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
+    if (field is! RenderBox || overlay is! RenderBox || !field.hasSize) return null;
+    return MatrixUtils.transformRect(field.getTransformTo(overlay), Offset.zero & field.size);
+  }
+
+  Future<void> _openCountryPicker() async {
+    final anchorRect = widget.positionedPopup ? _anchorRect() : null;
+    await showDialog<void>(
       context: context,
       useRootNavigator: false,
-      builder: (context) => SizedBox(
-        // width: widget.popupWidth,
-        child: StatefulBuilder(
-          builder: (ctx, setState) => CountryPickerDialog(
-            popupWidth: widget.popupWidth,
-            offset: widget.positionedPopup ? tapDetails.globalPosition : const Offset(0, 0),
-            alignment: widget.positionedPopup ? Alignment.topLeft : null,
-            languageCode: widget.languageCode.toLowerCase(),
-            style: widget.pickerDialogStyle,
-            filteredCountries: filteredCountries,
-            searchText: widget.searchText,
-            countryList: _countryList,
-            selectedCountry: _selectedCountry,
-            onCountryChanged: (Country country) {
-              _selectedCountry = country;
-              widget.onCountryChanged?.call(country);
-              setState(() {});
-            },
-          ),
-        ),
+      useSafeArea: anchorRect == null,
+      barrierColor: anchorRect != null ? Colors.transparent : Colors.black45,
+      builder: (context) => CountryPickerDialog(
+        anchorRect: anchorRect,
+        popupWidth: widget.popupWidth,
+        languageCode: widget.languageCode,
+        style: widget.pickerDialogStyle,
+        // ignore: deprecated_member_use_from_same_package
+        searchText: widget.searchText,
+        countryList: _countryList,
+        selectedCountry: _selectedCountry,
+        onCountryChanged: _onCountrySelected,
       ),
     );
-    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_useCupertino) return _buildCupertinoField();
     return TextFormField(
-      initialValue: (widget.controller == null) ? number : null,
-      autofillHints: widget.disableAutoFillHints ? null : [AutofillHints.telephoneNumberNational],
+      key: _fieldKey,
+      initialValue: (widget.controller == null) ? _initialNumber : null,
+      autofillHints: widget.disableAutoFillHints ? null : const [AutofillHints.telephoneNumberNational],
       readOnly: widget.readOnly,
       obscureText: widget.obscureText,
       textAlign: widget.textAlign,
@@ -418,38 +575,9 @@ class IntlPhoneFieldState extends State<IntlPhoneField> {
         counterText: !widget.enabled ? '' : null,
       ),
       style: widget.style,
-      onSaved: (value) {
-        widget.onSaved?.call(
-          PhoneNumber(
-            countryISOCode: _selectedCountry.code,
-            countryCode: '+${_selectedCountry.dialCode}${_selectedCountry.regionCode}',
-            number: value!,
-          ),
-        );
-      },
-      onChanged: (value) async {
-        final phoneNumber = PhoneNumber(
-          countryISOCode: _selectedCountry.code,
-          countryCode: '+${_selectedCountry.fullCountryCode}',
-          number: value,
-        );
-
-        if (widget.autovalidateMode != AutovalidateMode.disabled) {
-          validatorMessage = await widget.validator?.call(phoneNumber);
-        }
-
-        widget.onChanged?.call(phoneNumber);
-      },
-      validator: (value) {
-        if (value == null || !isNumeric(value)) return validatorMessage;
-        if (!widget.disableLengthCheck) {
-          return value.length >= _selectedCountry.minLength && value.length <= _selectedCountry.maxLength
-              ? null
-              : widget.invalidNumberMessage;
-        }
-
-        return validatorMessage;
-      },
+      onSaved: (value) => widget.onSaved?.call(phoneNumberFor(_selectedCountry, value ?? '')),
+      onChanged: (value) => widget.onChanged?.call(phoneNumberFor(_selectedCountry, value)),
+      validator: _validate,
       maxLength: widget.disableLengthCheck ? null : _selectedCountry.maxLength,
       keyboardType: widget.keyboardType,
       inputFormatters: widget.inputFormatters,
@@ -461,65 +589,103 @@ class IntlPhoneFieldState extends State<IntlPhoneField> {
     );
   }
 
-  Container _buildFlagsButton() {
-    return Container(
-      margin: widget.flagsButtonMargin,
+  Widget _buildCupertinoField() {
+    final decoration = widget.decoration;
+    return CupertinoIntlPhoneField(
+      key: _cupertinoKey,
+      controller: widget.controller,
+      focusNode: widget.focusNode,
+      initialValue: widget.initialValue,
+      initialCountryCode: widget.initialCountryCode,
+      countries: widget.countries,
+      languageCode: widget.languageCode,
+      placeholder: decoration.hintText ?? decoration.labelText,
+      placeholderStyle: decoration.hintStyle,
+      style: widget.style,
+      decoration: widget.cupertinoDecoration,
+      padding: widget.textFieldPadding ?? kCupertinoPhoneFieldPadding,
+      onChanged: widget.onChanged,
+      onCountryChanged: (country) {
+        _selectedCountry = country;
+        widget.onCountryChanged?.call(country);
+      },
+      onSubmitted: widget.onSubmitted,
+      onSaved: widget.onSaved,
+      onTap: widget.onTap,
+      validator: widget.validator,
+      autovalidateMode: widget.autovalidateMode ?? AutovalidateMode.disabled,
+      disableLengthCheck: widget.disableLengthCheck,
+      invalidNumberMessage: widget.invalidNumberMessage,
+      errorStyle: decoration.errorStyle,
+      enabled: widget.enabled,
+      readOnly: widget.readOnly,
+      autofocus: widget.autofocus,
+      obscureText: widget.obscureText,
+      keyboardType: widget.keyboardType,
+      textInputAction: widget.textInputAction,
+      inputFormatters: widget.inputFormatters,
+      keyboardAppearance: widget.keyboardAppearance,
+      textAlign: widget.textAlign,
+      textAlignVertical: widget.textAlignVertical,
+      cursorColor: widget.cursorColor,
+      cursorWidth: widget.cursorWidth,
+      cursorHeight: widget.cursorHeight,
+      cursorRadius: widget.cursorRadius ?? const Radius.circular(2.0),
+      showCursor: widget.showCursor,
+      disableAutoFillHints: widget.disableAutoFillHints,
+      showCountryFlag: widget.showCountryFlag,
+      flagWidth: widget.flagWidth,
+      showDropdownIcon: widget.showDropdownIcon,
+      dropdownIcon: widget._adaptiveDropdownIcon ?? kCupertinoDropdownIcon,
+      dropdownIconPosition: widget._adaptiveDropdownIconPosition ?? IconPosition.trailing,
+      dropdownTextStyle: widget.dropdownTextStyle,
+      flagsButtonPadding: widget._adaptiveFlagsButtonPadding ?? kCupertinoFlagsButtonPadding,
+      // ignore: deprecated_member_use_from_same_package
+      searchText: widget.searchText,
+      pickerStyle: widget.cupertinoPickerStyle,
+    );
+  }
+
+  Widget _buildFlagsButton() {
+    final showIcon = widget.enabled && widget.showDropdownIcon;
+    final borderRadius = widget.dropdownDecoration.borderRadius?.resolve(Directionality.of(context));
+    return Padding(
+      padding: widget.flagsButtonMargin,
       child: DecoratedBox(
         decoration: widget.dropdownDecoration,
-        child: InkWell(
-          borderRadius: widget.dropdownDecoration.borderRadius as BorderRadius?,
-          onTapUp: (details) => widget.enabled ? _changeCountry(details) : null,
-          child: Padding(
-            padding: widget.flagsButtonPadding,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                const SizedBox(
-                  width: 4,
-                ),
-                if (widget.enabled &&
-                    widget.showDropdownIcon &&
-                    widget.dropdownIconPosition == IconPosition.leading) ...[
-                  widget.dropdownIcon,
+        // Splashes paint on the nearest Material, so give the button its own
+        // above the decoration; otherwise a decoration color would hide them.
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            borderRadius: borderRadius,
+            onTap: _canPickCountry ? _openCountryPicker : null,
+            child: Padding(
+              padding: widget.flagsButtonPadding,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
                   const SizedBox(width: 4),
-                ],
-                if (widget.showCountryFlag) ...[
-                  kIsWeb
-                      ? Image.asset(
-                          'assets/flags/${_selectedCountry.code.toLowerCase()}.png',
-                          package: 'intl_phone_field2',
-                          width: widget.flagWidth,
-                        )
-                      : Text(
-                          _selectedCountry.flag,
-                          style: const TextStyle(fontSize: 18),
-                        ),
+                  if (showIcon && widget.dropdownIconPosition == IconPosition.leading) ...[
+                    widget.dropdownIcon,
+                    const SizedBox(width: 4),
+                  ],
+                  if (widget.showCountryFlag) ...[
+                    CountryFlag(country: _selectedCountry, width: widget.flagWidth, gaplessPlayback: true),
+                    const SizedBox(width: 8),
+                  ],
+                  Text('+${_selectedCountry.displayCC}', style: widget.dropdownTextStyle),
+                  if (showIcon && widget.dropdownIconPosition == IconPosition.trailing) ...[
+                    const SizedBox(width: 4),
+                    widget.dropdownIcon,
+                  ],
                   const SizedBox(width: 8),
                 ],
-                FittedBox(
-                  child: Text(
-                    '+${_selectedCountry.dialCode}',
-                    style: widget.dropdownTextStyle,
-                  ),
-                ),
-                if (widget.enabled &&
-                    widget.showDropdownIcon &&
-                    widget.dropdownIconPosition == IconPosition.trailing) ...[
-                  const SizedBox(width: 4),
-                  widget.dropdownIcon,
-                ],
-                const SizedBox(width: 8),
-              ],
+              ),
             ),
           ),
         ),
       ),
     );
   }
-}
-
-enum IconPosition {
-  leading,
-  trailing,
 }

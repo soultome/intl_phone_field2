@@ -7,6 +7,7 @@
 
 //import 'package:flutter_test/flutter_test.dart';
 import 'package:intl_phone_field2/countries.dart';
+import 'package:intl_phone_field2/helpers.dart';
 import 'package:test/test.dart';
 import 'package:intl_phone_field2/phone_number.dart';
 
@@ -88,13 +89,58 @@ void main() {
     });
 
     test('create alpha character in  PhoneNumber from +44abcdef', () {
-      expect(() => PhoneNumber.fromCompleteNumber(completeNumber: "+44abcdef"),
-          throwsA(const TypeMatcher<InvalidCharactersException>()));
+      expect(
+        () => PhoneNumber.fromCompleteNumber(completeNumber: "+44abcdef"),
+        throwsA(const TypeMatcher<InvalidCharactersException>()),
+      );
     });
 
     test('create alpha character in  PhoneNumber from +44abcdef1', () {
-      expect(() => PhoneNumber.fromCompleteNumber(completeNumber: "+44abcdef1"),
-          throwsA(const TypeMatcher<InvalidCharactersException>()));
+      expect(
+        () => PhoneNumber.fromCompleteNumber(completeNumber: "+44abcdef1"),
+        throwsA(const TypeMatcher<InvalidCharactersException>()),
+      );
+    });
+  });
+
+  group('dial code lookup', () {
+    test('prefers the longest dial code', () {
+      expect(PhoneNumber.getCountry('+18765551234').code, 'JM');
+      expect(PhoneNumber.getCountry('+12125551234').code, 'US');
+      expect(PhoneNumber.getCountry('+34912345678').code, 'ES');
+    });
+
+    test('unknown dial code gives an empty number instead of throwing', () {
+      final phoneNumber = PhoneNumber.fromCompleteNumber(completeNumber: '+999123456');
+      expect(phoneNumber.countryISOCode, '');
+      expect(() => PhoneNumber.getCountry('+999123456'), throwsStateError);
+    });
+
+    test('isValidNumber uses the ISO code to tell apart countries sharing a dial code', () {
+      final kazakh = PhoneNumber(countryISOCode: 'KZ', countryCode: '+7', number: '7011234567');
+      expect(kazakh.isValidNumber(), true);
+    });
+  });
+
+  group('helpers', () {
+    test('removeDiacritics', () {
+      expect(removeDiacritics('Åland Islands'), 'Aland Islands');
+      expect(removeDiacritics('Côte d\'Ivoire'), 'Cote d\'Ivoire');
+      expect(removeDiacritics('plain'), 'plain');
+    });
+
+    test('isNumeric', () {
+      expect(isNumeric('123'), true);
+      expect(isNumeric('+44'), true);
+      expect(isNumeric(''), false);
+      expect(isNumeric('12a'), false);
+      expect(isNumeric(' 12 '), false);
+    });
+
+    test('stringSearch matches names in any language and dial codes', () {
+      expect(countries.stringSearch('deutschland').map((c) => c.code), ['DE']);
+      expect(countries.stringSearch('+44').map((c) => c.code), containsAll(['GB', 'GG', 'IM', 'JE']));
+      expect(countries.stringSearch('+441481').map((c) => c.code), ['GG']);
     });
   });
 }
