@@ -1,3 +1,46 @@
+## [4.0.0] - Release
+
+Breaking:
+- Built on `material_ui` and `cupertino_ui` instead of `package:flutter/material.dart`. Requires Flutter 3.47 / Dart 3.13, and apps must pass `material_ui` types (such as `InputDecoration`).
+- `onChanged` is now also called when the user picks a different country.
+- The `validator` now runs whenever the length check passes; before, its result was discarded for numbers of valid length. Non-digit input now fails the length check.
+- The country picker can't be opened when the field is `readOnly`.
+- `positionedPopup` attaches the picker to the field instead of the tap position.
+- `CountryPickerDialog`: removed `filteredCountries`, `offset` and `alignment`, added `anchorRect`.
+- `IntlPhoneFieldState`: removed `filteredCountries`, `number` and `validatorMessage`, added `selectedCountry` and `phoneNumber`.
+- `isNumeric` now only accepts digits with an optional leading `+`.
+
+Added:
+- `CupertinoIntlPhoneField`, with a country picker in a Cupertino sheet (`CupertinoCountryPicker`, `CupertinoCountryPickerStyle`).
+- `IntlPhoneField.adaptive`: the Cupertino field on iOS and macOS, the Material field elsewhere.
+- The picker highlights the selected country, ranks name prefix matches first, and dismisses the keyboard on scroll.
+- `languageCode` accepts any casing or separator (`pt-br`, `PT_BR`).
+
+Fixed:
+- `+44` numbers were detected as Guernsey (its region code was lost), which limited UK numbers to 6 digits. Restored the region codes of Guernsey, Jersey and Isle of Man.
+- Numbers like `+1 876…` were detected as the first `+1` country. Detection now uses the longest dial code, and the main country for shared codes (US for `+1`, Russia for `+7`).
+- `initialCountryCode` with a dial code (`'+225'`) was ignored.
+- Crash with `AutovalidateMode.always` and no validator.
+- The validator didn't run on `Form.validate()` until the user typed, async validator messages were never shown, and async validators delayed `onChanged`.
+- The positioned popup could open off screen.
+- The field only showed the new country after the picker's closing animation.
+- Searching `+44` found nothing.
+- Translations with a region or script (`pt_BR`, `zh_TW`, `sr-Cyrl`) were never used.
+- An `initialValue` such as `9123456789` with `initialCountryCode: 'IN'` lost its leading `91`.
+- `PhoneNumber.fromCompleteNumber` threw for unknown dial codes.
+- `dropdownDecoration` with a `BorderRadiusDirectional` threw, and its color hid the tap ripple.
+- The country button showed a ripple when disabled and couldn't be activated with the keyboard.
+- `flagWidth` had no effect outside the web.
+- Emoji flags don't render on Windows; image flags are used there.
+- Phone number lengths of Puerto Rico, French Guiana, Guadeloupe, Martinique, Christmas Island, Cocos Islands, Finland, Åland Islands and Norfolk Island.
+
+Performance:
+- Country search no longer normalizes every name on each keystroke (about 300,000 string replacements); names are indexed once.
+- The country list no longer uses `shrinkWrap`, and only the list rebuilds while searching.
+- Flags have a fixed size, so rows don't shift while flag images load.
+- Flag images (1 MB) are only bundled for web and Windows; other platforms use emoji flags.
+- While the keyboard animates, the pickers no longer rebuild every visible row on each frame.
+
 ## [3.3.3] - Release
 - Add: flag size option
 ## [3.3.2] - Release
