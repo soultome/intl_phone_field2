@@ -21,6 +21,24 @@ final RegExp _nonDigits = RegExp(r'\D');
 final RegExp _digitsOnly = RegExp(r'^\d+$');
 final RegExp _leadingSeparators = RegExp(r'^[\s\-.()]+');
 
+/// Separators and invisible formatting characters in numbers copied from
+/// contacts, such as `+1 (555) 123-4567`, including the bidi marks iOS can wrap
+/// around them.
+final RegExp _phoneFormatting = RegExp(r'[\s\-.()/\u00AD\u2010-\u2015\u2212\u200B-\u200F\u202A-\u202E\u2060-\u2064]');
+final RegExp _phoneNumberInput = RegExp(r'^\+?\d+$');
+
+/// iOS and Android contacts store an extension after a pause (`,`) or a wait
+/// (`;`).
+final RegExp _phonePause = RegExp('[,;]');
+
+/// An optional trunk prefix, as in `+44 (0)7911 123456`.
+final RegExp _trunkPrefixNotation = RegExp(r'\(\s*0\s*\)');
+
+/// The zero of each digit set a phone number may be written in: Arabic-Indic,
+/// Persian, Devanagari, Bengali, Thai and full-width.
+const List<int> _unicodeZeros = [0x0660, 0x06F0, 0x0966, 0x09E6, 0x0E50, 0xFF10];
+const int _fullWidthPlus = 0xFF0B;
+
 bool isSameCountry(Country a, Country b) => a.code == b.code && a.fullCountryCode == b.fullCountryCode;
 
 /// Finds a country by ISO 3166 alpha-2 code (`'IN'`, case-insensitive) or by
@@ -109,6 +127,113 @@ Country _pickPrimary(List<Country> candidates, String dialCode) {
 
   return (country: country, number: number.replaceFirst(_leadingSeparators, ''));
 }
+
+/// Reads a phone number entered all at once, such as an autofilled
+/// `+977 984-1234567`, into its country and national number, without
+/// separators, extension or trunk prefix.
+///
+/// An international number, with `+` or `00`, selects the country of its dial
+/// code, preferring [selectedCountry] among countries that share it. When no
+/// country in [countries] has that dial code, [selectedCountry] is kept along
+/// with the `+` and dial code, so the number fails validation instead of
+/// passing for a national number.
+///
+/// [cursor] is an offset in [text]; the returned `cursor` is the matching
+/// offset in the number, or its end when [cursor] is null.
+///
+/// Returns `null` when [text] is not a phone number.
+({Country country, String number, int cursor})? parsePhoneNumberInput({
+  required List<Country> countries,
+  required Country selectedCountry,
+  required String text,
+  int? cursor,
+}) {
+  final characters = _phoneNumberCharacters(text);
+  final parsed = _readPhoneNumber(countries, selectedCountry, characters);
+  if (parsed == null) return null;
+
+  // Apart from separators, characters are only removed before the national
+  // number, so the cursor keeps the same digits after it.
+  final length = parsed.number.length;
+  var offset = length;
+  if (cursor != null && cursor >= 0 && cursor < text.length) {
+    final after = characters.length - _phoneNumberCharacters(text.substring(0, cursor)).length;
+    offset = (length - after).clamp(0, length);
+  }
+  return (country: parsed.country, number: parsed.number, cursor: offset);
+}
+
+({Country country, String number})? _readPhoneNumber(List<Country> countries, Country selected, String characters) {
+  var number = characters;
+  // An international number entered after other digits replaces them.
+  final plus = number.lastIndexOf('+');
+  if (plus > 0) number = number.substring(plus);
+  if (!_phoneNumberInput.hasMatch(number)) return null;
+
+  if (number.startsWith('+')) {
+    return _readInternational(countries, selected, number.substring(1)) ?? (country: selected, number: number);
+  }
+
+  // 00 is the international prefix in most countries, as in 0044 7911 123456.
+  if (number.startsWith('00') && number.length > selected.maxLength) {
+    final digits = number.substring(2);
+    final international = _readInternational(countries, selected, digits);
+    if (international != null) return international;
+    if (matchCountryByPrefix(_allCountries, digits) != null) return (country: selected, number: '+$digits');
+  }
+
+  // As for an initialValue, leading digits are only the country code when the
+  // number is too long without them.
+  final dialCode = selected.fullCountryCode;
+  if (number.length > selected.maxLength && number.startsWith(dialCode)) {
+    number = number.substring(dialCode.length);
+  }
+  return (country: selected, number: _withoutTrunkPrefix(number, selected));
+}
+
+({Country country, String number})? _readInternational(List<Country> countries, Country selected, String digits) {
+  final country = matchCountryByPrefix(countries, digits, preferredIsoCode: selected.code);
+  if (country == null) return null;
+  return (country: country, number: _withoutTrunkPrefix(digits.substring(country.fullCountryCode.length), country));
+}
+
+/// Removes the trunk prefix of numbers such as `07911 123456` or
+/// `+44 07911 123456`. Numbers that fit the country's length keep their
+/// leading 0, which is part of the number in countries such as Italy.
+String _withoutTrunkPrefix(String number, Country country) =>
+    number.length > country.maxLength && number.startsWith('0') ? number.substring(1) : number;
+
+/// The characters of [text] that make up a phone number: ASCII digits and `+`,
+/// without separators, a trunk prefix in parentheses or an extension.
+String _phoneNumberCharacters(String text) {
+  final pause = text.indexOf(_phonePause);
+  final number = pause < 0 ? text : text.substring(0, pause);
+  return _asciiDigits(number).replaceAll(_trunkPrefixNotation, '').replaceAll(_phoneFormatting, '');
+}
+
+String _asciiDigits(String text) {
+  List<int>? codeUnits;
+  for (var i = 0; i < text.length; i++) {
+    final unit = text.codeUnitAt(i);
+    if (unit < _unicodeZeros.first) continue;
+    int? ascii;
+    if (unit == _fullWidthPlus) {
+      ascii = 0x2B;
+    } else {
+      for (final zero in _unicodeZeros) {
+        if (unit >= zero && unit <= zero + 9) {
+          ascii = 0x30 + unit - zero;
+          break;
+        }
+      }
+    }
+    if (ascii != null) (codeUnits ??= text.codeUnits.toList())[i] = ascii;
+  }
+  return codeUnits == null ? text : String.fromCharCodes(codeUnits);
+}
+
+// The parameters named `countries` hide the full list.
+List<Country> get _allCountries => countries;
 
 /// Removes [prefix] from the start of [value], skipping separators such as
 /// spaces or dashes between its digits.

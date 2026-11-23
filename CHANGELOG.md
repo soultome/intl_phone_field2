@@ -1,3 +1,13 @@
+## [Unreleased]
+
+Fixed:
+- On iOS, an autofilled number comes with its country code and formatting, as saved in Contacts (`+977 984-123 4567`). It was cut to the country's length (`+977 984-1`), or ignored when the field was full. An autofilled or pasted number now keeps only its national number, without separators.
+- Autofilled or pasted numbers with a `00` prefix (`0044 7911 123456`) or a trunk prefix (`+44 (0)7911 123456`, `07911 123456`) were cut into a wrong number of valid length. Extensions after `,` or `;` are dropped, and Arabic-Indic, Persian, Devanagari, Bengali, Thai and full-width digits are read.
+- The Cayman Islands dial code was `+345` instead of `+1 345`, so Spanish numbers starting with 5 were detected as Cayman numbers.
+
+Added:
+- An autofilled or pasted international number selects its country when that country is in `countries`, and calls `onCountryChanged` and `onChanged`. Otherwise the selected country stays, and so does the `+` and dial code, so the number fails validation instead of passing as a local one.
+
 ## [4.0.0] - Release
 
 Breaking:

@@ -1238,7 +1238,7 @@ const List<Country> countries = [
     },
     flag: "🇰🇾",
     code: "KY",
-    dialCode: "345",
+    dialCode: "1345",
     minLength: 7,
     maxLength: 7,
   ),

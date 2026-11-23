@@ -12,6 +12,7 @@ import 'package:intl_phone_field2/src/country_flag.dart';
 import 'package:intl_phone_field2/src/country_utils.dart';
 import 'package:intl_phone_field2/src/cupertino_defaults.dart';
 import 'package:intl_phone_field2/src/icon_position.dart';
+import 'package:intl_phone_field2/src/phone_input.dart';
 import 'package:intl_phone_field2/src/phone_validation.dart';
 
 export 'package:intl_phone_field2/cupertino_country_picker.dart' show CupertinoCountryPickerStyle;
@@ -180,6 +181,11 @@ class CupertinoIntlPhoneField extends StatefulWidget {
 class CupertinoIntlPhoneFieldState extends State<CupertinoIntlPhoneField> {
   final GlobalKey<FormFieldState<String>> _fieldKey = GlobalKey<FormFieldState<String>>();
   late final PhoneFieldValidation _validation = PhoneFieldValidation(onAsyncResult: _revalidate);
+  late final PhoneFieldInput _input = PhoneFieldInput(
+    countries: () => _countryList,
+    selectedCountry: () => _selectedCountry,
+    onCountryDetected: _onCountryDetected,
+  );
   late List<Country> _countryList;
   late Country _selectedCountry;
   late String _initialNumber;
@@ -243,6 +249,15 @@ class CupertinoIntlPhoneFieldState extends State<CupertinoIntlPhoneField> {
     if (changed) widget.onChanged?.call(phoneNumber);
   }
 
+  /// Selects the country of an autofilled or pasted international number.
+  void _onCountryDetected(Country country, {required bool textChanged}) {
+    if (!mounted) return;
+    setState(() => _selectedCountry = country);
+    widget.onCountryChanged?.call(country);
+    // Otherwise the text field calls onChanged, after this country change.
+    if (!textChanged) widget.onChanged?.call(phoneNumber);
+  }
+
   Future<void> _openCountryPicker() async {
     await showCupertinoSheet<void>(
       context: context,
@@ -263,6 +278,13 @@ class CupertinoIntlPhoneFieldState extends State<CupertinoIntlPhoneField> {
   Widget build(BuildContext context) {
     // Built here rather than in fieldBuilder, which runs on every keystroke.
     final countryButton = _buildCountryButton(context);
+    // The country's length limit is applied by these, not by maxLength, so it
+    // follows a country selected by autofill.
+    final inputFormatters = _input.formatters(
+      inputFormatters: widget.inputFormatters,
+      limitLength: !widget.disableLengthCheck,
+      maxLengthEnforcement: LengthLimitingTextInputFormatter.getDefaultMaxLengthEnforcement(),
+    );
     return _CupertinoPhoneFormField(
       key: _fieldKey,
       controller: widget.controller,
@@ -289,7 +311,7 @@ class CupertinoIntlPhoneFieldState extends State<CupertinoIntlPhoneField> {
               prefix: countryButton,
               keyboardType: widget.keyboardType,
               textInputAction: widget.textInputAction,
-              inputFormatters: widget.inputFormatters,
+              inputFormatters: inputFormatters,
               keyboardAppearance: widget.keyboardAppearance,
               textAlign: widget.textAlign,
               textAlignVertical: widget.textAlignVertical,
@@ -301,7 +323,6 @@ class CupertinoIntlPhoneFieldState extends State<CupertinoIntlPhoneField> {
               autofillHints: widget.disableAutoFillHints
                   ? null
                   : const [AutofillHints.telephoneNumber, AutofillHints.telephoneNumberNational],
-              maxLength: widget.disableLengthCheck ? null : _selectedCountry.maxLength,
               enabled: widget.enabled,
               readOnly: widget.readOnly,
               autofocus: widget.autofocus,

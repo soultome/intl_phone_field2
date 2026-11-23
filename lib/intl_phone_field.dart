@@ -8,6 +8,7 @@ import 'package:intl_phone_field2/cupertino_intl_phone_field.dart';
 import 'package:intl_phone_field2/src/country_flag.dart';
 import 'package:intl_phone_field2/src/country_utils.dart';
 import 'package:intl_phone_field2/src/cupertino_defaults.dart';
+import 'package:intl_phone_field2/src/phone_input.dart';
 import 'package:intl_phone_field2/src/phone_validation.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -450,6 +451,11 @@ class IntlPhoneFieldState extends State<IntlPhoneField> {
   final GlobalKey<FormFieldState<String>> _fieldKey = GlobalKey<FormFieldState<String>>();
   late final GlobalKey<CupertinoIntlPhoneFieldState> _cupertinoKey = GlobalKey<CupertinoIntlPhoneFieldState>();
   late final PhoneFieldValidation _validation = PhoneFieldValidation(onAsyncResult: _revalidate);
+  late final PhoneFieldInput _input = PhoneFieldInput(
+    countries: () => _countryList,
+    selectedCountry: () => _selectedCountry,
+    onCountryDetected: _onCountryDetected,
+  );
   late List<Country> _countryList;
   late Country _selectedCountry;
   late String _initialNumber;
@@ -519,6 +525,15 @@ class IntlPhoneFieldState extends State<IntlPhoneField> {
     if (changed) widget.onChanged?.call(phoneNumber);
   }
 
+  /// Selects the country of an autofilled or pasted international number.
+  void _onCountryDetected(Country country, {required bool textChanged}) {
+    if (!mounted) return;
+    setState(() => _selectedCountry = country);
+    widget.onCountryChanged?.call(country);
+    // Otherwise the text field calls onChanged, after this country change.
+    if (!textChanged) widget.onChanged?.call(phoneNumber);
+  }
+
   /// The field's bounds in the coordinate space of the picker's overlay.
   Rect? _anchorRect() {
     final field = _fieldKey.currentContext?.findRenderObject();
@@ -581,8 +596,16 @@ class IntlPhoneFieldState extends State<IntlPhoneField> {
       onChanged: (value) => widget.onChanged?.call(phoneNumberFor(_selectedCountry, value)),
       validator: _validate,
       maxLength: widget.disableLengthCheck ? null : _selectedCountry.maxLength,
+      // Enforced by _input instead, which follows a country selected by autofill.
+      maxLengthEnforcement: MaxLengthEnforcement.none,
       keyboardType: widget.keyboardType,
-      inputFormatters: widget.inputFormatters,
+      inputFormatters: _input.formatters(
+        inputFormatters: widget.inputFormatters,
+        limitLength: !widget.disableLengthCheck,
+        maxLengthEnforcement: LengthLimitingTextInputFormatter.getDefaultMaxLengthEnforcement(
+          Theme.of(context).platform,
+        ),
+      ),
       enabled: widget.enabled,
       keyboardAppearance: widget.keyboardAppearance,
       autofocus: widget.autofocus,
