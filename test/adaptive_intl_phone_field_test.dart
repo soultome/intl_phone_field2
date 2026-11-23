@@ -1,6 +1,7 @@
 import 'package:cupertino_ui/cupertino_ui.dart'
     show CupertinoIcons, CupertinoListTile, CupertinoSearchTextField, CupertinoTextField;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl_phone_field2/countries.dart';
 import 'package:intl_phone_field2/country_picker_dialog.dart';
 import 'package:intl_phone_field2/cupertino_country_picker.dart';
 import 'package:intl_phone_field2/cupertino_intl_phone_field.dart';
@@ -108,6 +109,24 @@ void main() {
     expect(formKey.currentState!.validate(), isFalse);
     await tester.pumpAndSettle();
     expect(find.text('Invalid Mobile Number'), findsOneWidget);
+  });
+
+  testWidgets('Cupertino mode selects the country of an autofilled number', (tester) async {
+    Country? changedCountry;
+    await tester.pumpWidget(
+      wrap(
+        TargetPlatform.iOS,
+        IntlPhoneField.adaptive(initialCountryCode: 'US', onCountryChanged: (country) => changedCountry = country),
+      ),
+    );
+
+    await tester.enterText(find.byType(CupertinoTextField), '+44 7911 123456');
+    await tester.pump();
+
+    final state = tester.state<IntlPhoneFieldState>(find.byType(IntlPhoneField));
+    expect(changedCountry?.code, 'GB');
+    expect(state.selectedCountry.code, 'GB');
+    expect(state.phoneNumber.completeNumber, '+447911123456');
   });
 
   testWidgets('explicit options are kept on every platform', (tester) async {
