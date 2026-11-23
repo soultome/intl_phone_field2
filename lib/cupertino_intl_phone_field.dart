@@ -298,7 +298,9 @@ class CupertinoIntlPhoneFieldState extends State<CupertinoIntlPhoneField> {
               cursorHeight: widget.cursorHeight,
               cursorRadius: widget.cursorRadius,
               showCursor: widget.showCursor,
-              autofillHints: widget.disableAutoFillHints ? null : const [AutofillHints.telephoneNumberNational],
+              autofillHints: widget.disableAutoFillHints
+                  ? null
+                  : const [AutofillHints.telephoneNumber, AutofillHints.telephoneNumberNational],
               maxLength: widget.disableLengthCheck ? null : _selectedCountry.maxLength,
               enabled: widget.enabled,
               readOnly: widget.readOnly,
