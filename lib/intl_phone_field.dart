@@ -554,7 +554,9 @@ class IntlPhoneFieldState extends State<IntlPhoneField> {
     return TextFormField(
       key: _fieldKey,
       initialValue: (widget.controller == null) ? _initialNumber : null,
-      autofillHints: widget.disableAutoFillHints ? null : const [AutofillHints.telephoneNumberNational],
+      autofillHints: widget.disableAutoFillHints
+          ? null
+          : const [AutofillHints.telephoneNumber, AutofillHints.telephoneNumberNational],
       readOnly: widget.readOnly,
       obscureText: widget.obscureText,
       textAlign: widget.textAlign,
